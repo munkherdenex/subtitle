@@ -127,18 +127,6 @@ function parseTranslations(
 }
 
 export async function POST(request: Request) {
-  const expectedPassword = process.env.APP_PASSWORD;
-  if (!expectedPassword) {
-    console.error("APP_PASSWORD is not configured.");
-    return NextResponse.json(
-      { error: "Серверийн тохиргоо дутуу байна." },
-      { status: 500 },
-    );
-  }
-  if (request.headers.get("x-app-password") !== expectedPassword) {
-    return NextResponse.json({ error: "Нууц үг буруу байна." }, { status: 401 });
-  }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -153,7 +141,11 @@ export async function POST(request: Request) {
   if (!apiKey) {
     console.error("ANTHROPIC_API_KEY is not configured.");
     return NextResponse.json(
-      { error: "Орчуулгын үйлчилгээний тохиргоо дутуу байна." },
+      {
+        code: "MISSING_API_KEY",
+        error:
+          "ANTHROPIC_API_KEY тохируулаагүй байна. .env.local файлд түлхүүрээ нэмээд серверийг дахин эхлүүлнэ үү.",
+      },
       { status: 500 },
     );
   }

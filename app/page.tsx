@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 import { parseSrt, serializeSrt, type SubtitleCue } from "@/lib/srt";
 import type { TranslationTone } from "@/lib/prompt";
 
 const BATCH_SIZE = 60;
-const PASSWORD_STORAGE_KEY = "subtitle-translator-password";
 
 interface TranslationBatch {
   number: number;
@@ -20,6 +19,11 @@ interface TranslationResponse {
   translations: Array<{ id: number; text: string }>;
 }
 
+interface TranslationError {
+  error?: string;
+  code?: string;
+}
+
 function getBatchCues(cues: SubtitleCue[], start: number): SubtitleCue[] {
   return cues.slice(start, start + BATCH_SIZE);
 }
@@ -29,20 +33,11 @@ export default function Home() {
   const [cues, setCues] = useState<SubtitleCue[]>([]);
   const [batches, setBatches] = useState<TranslationBatch[]>([]);
   const [translations, setTranslations] = useState<Record<number, string>>({});
-  const [password, setPassword] = useState("");
   const [tone, setTone] = useState<TranslationTone>("softened");
   const [movieContext, setMovieContext] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    try {
-      setPassword(localStorage.getItem(PASSWORD_STORAGE_KEY) ?? "");
-    } catch {
-      setMessage("Хөтчийн санах ойд нэвтрэх боломжгүй байна. Нууц үгээ дахин оруулна уу.");
-    }
-  }, []);
 
   const completedCount = useMemo(
     () => batches.filter((batch) => batch.status === "done").length,
@@ -95,7 +90,7 @@ export default function Home() {
     if (file) void readFile(file);
   }
 
-  async function translateBatch(batch: TranslationBatch): Promise<void> {
+  async function translateBatch(batch: TranslationBatch): Promise<boolean> {
     const inputCues = batch.cues.map((cue, offset) => ({
       id: batch.start + offset,
       text: cue.text,
@@ -111,7 +106,6 @@ export default function Home() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-app-password": password,
           },
           body: JSON.stringify({
             cues: inputCues,
@@ -122,8 +116,12 @@ export default function Home() {
         });
         const result = (await response.json()) as
           | TranslationResponse
-          | { error?: string };
+          | TranslationError;
         if (!response.ok) {
+          if ("code" in result && result.code === "MISSING_API_KEY") {
+            lastError = result.error ?? "ANTHROPIC_API_KEY тохируулаагүй байна.";
+            break;
+          }
           throw new Error("error" in result ? result.error : undefined);
         }
         if (!("translations" in result) || result.translations.length !== inputCues.length) {
@@ -146,11 +144,6 @@ export default function Home() {
           throw new Error("Орчуулгын мөр дутуу байна.");
         }
         setTranslations((previous) => ({ ...previous, ...nextTranslations }));
-        try {
-          localStorage.setItem(PASSWORD_STORAGE_KEY, password);
-        } catch {
-          setMessage("Орчуулга амжилттай. Нууц үгийг хөтөчид хадгалж чадсангүй.");
-        }
         setBatches((previous) =>
           previous.map((item) =>
             item.number === batch.number
@@ -158,7 +151,7 @@ export default function Home() {
               : item,
           ),
         );
-        return;
+        return true;
       } catch (error) {
         lastError =
           error instanceof Error ? error.message : "Сүлжээний алдаа гарлаа.";
@@ -172,11 +165,12 @@ export default function Home() {
           : item,
       ),
     );
+    return false;
   }
 
   async function translateAll() {
-    if (!cues.length || !password.trim()) {
-      setMessage(!cues.length ? "Эхлээд хадмал файл сонгоно уу." : "Нууц үгээ оруулна уу.");
+    if (!cues.length) {
+      setMessage("Эхлээд хадмал файл сонгоно уу.");
       return;
     }
     const nextBatches: TranslationBatch[] = [];
@@ -198,7 +192,11 @@ export default function Home() {
           item.number === batch.number ? { ...item, status: "translating" } : item,
         ),
       );
-      await translateBatch(batch);
+      const translated = await translateBatch(batch);
+      if (!translated) {
+        setBatches((previous) => previous.slice(0, batch.number));
+        break;
+      }
     }
     setBusy(false);
   }
@@ -285,17 +283,6 @@ export default function Home() {
           </div>
 
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
-            <label className="block text-sm font-semibold">
-              Нууц үг
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Аппын нууц үг"
-                className="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3.5 py-3 font-normal outline-none transition placeholder:text-stone-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-              />
-            </label>
             <label className="block text-sm font-semibold">
               Орчуулгын өнгө
               <select
@@ -425,7 +412,7 @@ export default function Home() {
         )}
 
         <p className="mt-6 text-center text-xs leading-5 text-stone-500">
-          Нууц үг таны хөтөчид хадгалагдана. Файлын агуулгыг зөвхөн орчуулгын хүсэлтээр илгээнэ.
+          Файлын агуулгыг зөвхөн орчуулгын хүсэлтээр серверт илгээнэ.
         </p>
       </div>
     </main>

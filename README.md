@@ -19,10 +19,7 @@
 
    ```dotenv
    ANTHROPIC_API_KEY=your_anthropic_api_key
-   APP_PASSWORD=choose-a-private-password
    ```
-
-   `APP_PASSWORD` нь орчуулгын API-г зөвшөөрөхөд ашиглагдах тул таамаглахад хэцүү утга сонгоорой.
 
 3. Хөгжүүлэлтийн серверийг эхлүүлнэ:
 
@@ -35,13 +32,12 @@
 ## Vercel-д байрлуулах
 
 1. Энэ GitHub репозиторыг Vercel-д холбоно.
-2. Vercel төслийн **Settings → Environment Variables** хэсэгт дараах хоёр хувьсагчийг нэмнэ:
+2. Vercel төслийн **Settings → Environment Variables** хэсэгт дараах хувьсагчийг нэмнэ:
    - `ANTHROPIC_API_KEY` — Anthropic API түлхүүр
-   - `APP_PASSWORD` — аппыг ашиглах нууц үг
 3. Хувьсагчийг Production болон ашиглах шаардлагатай Preview/Development орчинд тохируулна.
 4. Репозиторыг deploy хийнэ. Environment Variables өөрчилсний дараа шинэ deployment ажиллуулах шаардлагатай.
 
-Орчуулах бүрд хөтөч `APP_PASSWORD` утгыг `x-app-password` хүсэлтийн header-д илгээнэ. Зөв нууц үгийг анх амжилттай орчуулсны дараа тухайн төхөөрөмжийн `localStorage`-д хадгалдаг тул итгэлгүй төхөөрөмжид бүү ашиглаарай.
+Апп нууц үг болон хэрэглэгчийн бүртгэл шаарддаггүй. Иймээс байршуулсан аппын орчуулгын API-г хандсан хэн ч таны Anthropic API-ийн хэрэглээг нэмэгдүүлж болно; хувийн байдлаар байлгахын тулд Vercel Deployment Protection зэрэг платформын хандалтын хязгаарлалт ашиглана уу.
 
 ## Ашиглалт
 
