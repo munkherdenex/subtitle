@@ -194,7 +194,13 @@ export default function Home() {
       );
       const translated = await translateBatch(batch);
       if (!translated) {
-        setBatches((previous) => previous.slice(0, batch.number));
+        setBatches((previous) =>
+          previous.map((item) =>
+            item.number === batch.number
+              ? { ...item, status: "error" }
+              : item,
+          ),
+        );
         break;
       }
     }

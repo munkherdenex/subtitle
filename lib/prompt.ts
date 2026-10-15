@@ -1,4 +1,4 @@
-export const CLAUDE_MODEL = "claude-sonnet-5-5";
+export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 export type TranslationTone = "softened" | "faithful";
 
