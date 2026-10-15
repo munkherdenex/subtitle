@@ -26,6 +26,97 @@ interface FormattingTag {
   original: string;
 }
 
+function getTranslationProvider(): "anthropic" | "ollama" {
+  const provider = (process.env.TRANSLATION_PROVIDER ?? "anthropic").toLowerCase();
+  return provider === "ollama" ? "ollama" : "anthropic";
+}
+
+async function getAnthropicResponseText(
+  body: TranslateRequest,
+  protectedCues: TranslationCue[],
+): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "ANTHROPIC_API_KEY тохируулаагүй байна. .env.local файлд түлхүүрээ нэмээд серверийг дахин эхлүүлнэ үү.",
+    );
+  }
+
+  const anthropic = new Anthropic({ apiKey });
+  const response = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 8192,
+    system: buildSystemPrompt(body.tone),
+    messages: [
+      {
+        role: "user",
+        content: buildUserMessage(
+          protectedCues,
+          body.context.slice(-8),
+          body.movieContext,
+        ),
+      },
+    ],
+  });
+
+  return response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+}
+
+async function getOllamaResponseText(
+  body: TranslateRequest,
+  protectedCues: TranslationCue[],
+): Promise<string> {
+  const baseUrl = (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434").replace(/\/$/, "");
+  const model = process.env.OLLAMA_MODEL ?? "llama3.1";
+
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      format: "json",
+      messages: [
+        {
+          role: "system",
+          content: buildSystemPrompt(body.tone),
+        },
+        {
+          role: "user",
+          content: buildUserMessage(
+            protectedCues,
+            body.context.slice(-8),
+            body.movieContext,
+          ),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(
+      `Ollama request failed (${response.status}): ${detail || "Local model unavailable."}`,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    message?: { content?: string };
+  };
+
+  const content = payload.message?.content ?? "";
+  if (!content.trim()) {
+    throw new Error("Ollama returned an empty response.");
+  }
+
+  return content;
+}
+
 function isTranslateRequest(value: unknown): value is TranslateRequest {
   if (!value || typeof value !== "object") return false;
   const request = value as Record<string, unknown>;
@@ -77,6 +168,7 @@ function parseTranslations(
   responseText: string,
   cues: TranslationCue[],
   tagsById: Map<number, FormattingTag[]>,
+
 ): TranslationCue[] | null {
   const jsonText = responseText
     .trim()
@@ -137,49 +229,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Орчуулгын өгөгдөл буруу байна." }, { status: 400 });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error("ANTHROPIC_API_KEY is not configured.");
-    return NextResponse.json(
-      {
-        code: "MISSING_API_KEY",
-        error:
-          "ANTHROPIC_API_KEY тохируулаагүй байна. .env.local файлд түлхүүрээ нэмээд серверийг дахин эхлүүлнэ үү.",
-      },
-      { status: 500 },
-    );
-  }
-
-  const anthropic = new Anthropic({ apiKey });
+  const provider = getTranslationProvider();
   const { protectedCues, tagsById } = protectFormatting(body.cues);
+
+  let lastError = "Энэ багцын хариу буруу форматтай байна. Дахин оролдоно уу.";
+
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await anthropic.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 8192,
-        system: buildSystemPrompt(body.tone),
-        messages: [
-          {
-            role: "user",
-            content: buildUserMessage(
-              protectedCues,
-              body.context.slice(-8),
-              body.movieContext,
-            ),
-          },
-        ],
-      });
-      const responseText = response.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join("\n");
+      let responseText = "";
+      try {
+        responseText =
+          provider === "ollama"
+            ? await getOllamaResponseText(body, protectedCues)
+            : await getAnthropicResponseText(body, protectedCues);
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "Model request failed.";
+        continue;
+      }
+
       const translations = parseTranslations(responseText, body.cues, tagsById);
       if (translations) {
         return NextResponse.json({ translations });
       }
+      lastError = "Энэ багцын хариу буруу форматтай байна. Дахин оролдоно уу.";
     }
+
+    const providerLabel = provider === "ollama" ? "Ollama" : "Anthropic";
     return NextResponse.json(
-      { error: "Энэ багцын хариу буруу форматтай байна. Дахин оролдоно уу." },
+      {
+        error: `${providerLabel} серверээс буруу хариу ирлээ. Дахин оролдоно уу.`,
+        details: lastError,
+      },
       { status: 502 },
     );
   } catch (error) {
